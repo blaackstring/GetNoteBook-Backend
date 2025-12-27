@@ -65,22 +65,15 @@ async function getImages() {
 
 
 async function getAudioDuration() {
-  const currentDir = rootDir;
-  const dockerProbe = `docker run --rm -v "${currentDir}:/config" --entrypoint ffprobe linuxserver/ffmpeg -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 /config/input.mp3`;
+  // Use local ffprobe since it is installed in the container
+  const probeCommand = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${path.join(rootDir, 'input.mp3')}"`;
 
   return new Promise((resolve) => {
-    exec(dockerProbe, (error, stdout) => {
-      if (error || !stdout) 
-        {
+    exec(probeCommand, (error, stdout) => {
+      if (error || !stdout) {
         console.warn("⚠️ Could not probe audio duration. Defaulting to -shortest.");
         resolve(null);
-      } 
-      
-      
-      else
-        
-        
-        {
+      } else {
         const seconds = parseFloat(stdout.trim());
         console.log(`⏱️ Audio Duration detected: ${seconds}s`);
         resolve(seconds);
@@ -89,35 +82,35 @@ async function getAudioDuration() {
   });
 }
 
-
 async function createVideo(imagesDir) {
-  console.log("🎬 Creating Video with ffmpeg (Docker)...");
+  console.log("🎬 Creating Video with ffmpeg (Local)...");
 
   const currentDir = rootDir;
   const outputPath = "output.mp4";
 
   const duration = await getAudioDuration();
 
-
   const durationOption = duration ? `-t ${Math.ceil(duration)}` : "-shortest";
 
+  // Use local ffmpeg command
+  // Input 1: Images at src/images/%d.png (relative to rootDir)
+  // Input 2: Audio at input.mp3 (relative to rootDir)
+  const imageInput = path.join(rootDir, "src", "images", "%d.png");
+  const audioInput = path.join(rootDir, "input.mp3");
+  const output = path.join(rootDir, outputPath);
 
-  const dockerCommand = `docker run --rm -v "${currentDir}:/config" -w /config linuxserver/ffmpeg -loop 1 -framerate 1/10 -i src/images/%d.png -i input.mp3 -c:v libx264 -pix_fmt yuv420p ${durationOption} output.mp4 -y`;
+  const ffmpegCommand = `ffmpeg -loop 1 -framerate 1/10 -i "${imageInput}" -i "${audioInput}" -c:v libx264 -pix_fmt yuv420p ${durationOption} "${output}" -y`;
 
   return new Promise((resolve, reject) => {
-    exec(dockerCommand, (error, stdout, stderr) => {
-      if (error)
-         {
-        console.error("Error executing docker ffmpeg:", error);
+    exec(ffmpegCommand, (error, stdout, stderr) => {
+      if (error) {
+        console.error("Error executing ffmpeg:", error);
         console.error("Stderr:", stderr);
-        
         resolve(null);
-      } 
-      else 
-        {
+      } else {
         console.log("ffmpeg output:", stderr);
         console.log("✅ Video created: output.mp4");
-        resolve(path.join(currentDir, outputPath));
+        resolve(output);
       }
     });
   });
@@ -135,25 +128,23 @@ export const summary = async (req, res) => {
 
     const text = getSummaryText();
 
-  
+
     await generateAudio(text);
 
 
     const imagesDir = await getImages();
 
-  
+
     const videoPath = await createVideo(imagesDir);
 
-    if (videoPath && fs.existsSync(videoPath)) 
-      {
-  console.log("☁️ Uploading to S3...");
-const videoBuffer = fs.readFileSync(videoPath);
+    if (videoPath && fs.existsSync(videoPath)) {
+      console.log("☁️ Uploading to S3...");
+      const videoBuffer = fs.readFileSync(videoPath);
       const uniqueKey = `video_summary_${Date.now()}.mp4`;
 
-      if (!process.env.S3_BUCKET_NAME)
-         {
+      if (!process.env.S3_BUCKET_NAME) {
         console.warn("⚠️ S3_BUCKET_NAME not set. Attempting to load from src/.env manual check or fail.");
- 
+
       }
 
       const uploadResult = await uploadFileToS3(videoBuffer, uniqueKey, "video/mp4");
@@ -175,8 +166,7 @@ const videoBuffer = fs.readFileSync(videoPath);
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) 
-  {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   summary(
     {},
     {
