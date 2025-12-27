@@ -19,6 +19,11 @@ app.use(express.urlencoded({ extended: true }));// it is used to parse URL-encod
 
 
 app.use(cors(
+   {
+     origin:"https://get-note-book.vercel.app",
+    methods:"GET,POST,PUT,DELETE",
+    credentials:true
+   }
 ))
 
 app.use('/api/v1/rag_query', ragQueryRouter);
